@@ -96,6 +96,18 @@ private fun loadPacks(): LoadResult {
             res.add(Pack(dir, f, name, icon, path))
         }
     }
+    if (res.isEmpty()) {
+        val cmds = listOf(
+            "pm list packages -U mojang 2>&1",
+            "ls -la ${q(ROOTS[0] + "/files/games/com.mojang/minecraftpe")} 2>&1 | head -20",
+            "ls -ld /data/data/com.mojang.minecraftpe /data/user/0/com.mojang.minecraftpe 2>&1",
+            "timeout 25 find /sdcard -maxdepth 5 -iname '*_packs' -o -name minecraftWorlds 2>/dev/null | head -20"
+        )
+        for (c in cmds) {
+            dbg.append("\n> ").append(c.take(60)).append("\n")
+            dbg.append(shText(c).trim().take(1500)).append("\n")
+        }
+    }
     return LoadResult(res, dbg.toString())
 }
 
@@ -182,7 +194,14 @@ class MainActivity : Activity() {
     private fun show(r: LoadResult) {
         val packs = r.packs
         list.removeAllViews(); rows.clear()
-        status.text = if (packs.isEmpty()) "Паков не найдено\n\n${r.debug}" else "Найдено паков: ${packs.size}"
+        status.text = if (packs.isEmpty()) "Паков не найдено" else "Найдено паков: ${packs.size}"
+        if (packs.isEmpty()) {
+            list.addView(TextView(this).apply {
+                text = r.debug
+                textSize = 12f
+                setTextIsSelectable(true)
+            })
+        }
         for (p in packs) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
