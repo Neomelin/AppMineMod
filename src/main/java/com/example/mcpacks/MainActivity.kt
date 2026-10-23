@@ -66,6 +66,10 @@ private fun loadPacks(): LoadResult {
             shText("find ${q(root)} -maxdepth 8 -name manifest.json 2>/dev/null").lines().filter { it.isNotBlank() }
         else emptyList()
         dbg.append("$root\n  ${if (exists) "папка есть, manifest.json: ${found.size}" else chk.take(70)}\n")
+        if (exists && found.isEmpty()) {
+            val tree = shText("find ${q(root)} -maxdepth 4 2>&1 | head -40")
+            dbg.append(tree.replace(root, "~")).append("\n")
+        }
         for (mf in found) {
             if (mf.contains("/worlds/")) continue
             val path = mf.substringBeforeLast("/")
