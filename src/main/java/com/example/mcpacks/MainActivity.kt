@@ -2,6 +2,9 @@ package com.example.mcpacks
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -122,12 +125,16 @@ private fun deletePack(p: Pack): String {
     )
     val sb = StringBuilder()
     for (v in variants) {
-        val out = shText("rm -rf ${q(v)} 2>&1").trim().take(200)
+        val out = shText("rm -rf ${q(v)} 2>&1").trim().lines().firstOrNull().orEmpty().take(90)
         val still = shText("ls -d ${q(p.path)} 2>&1").trim() == p.path
         if (!still) return ""
-        sb.append(v.substringBefore("/Android")).append(": ").append(out.ifEmpty { "нет вывода, но папка осталась" }).append("\n")
+        sb.append(v.substringBefore("/Android")).append(": ").append(out.ifEmpty { "нет вывода" }).append("\n")
     }
-    sb.append("id: ").append(shText("id 2>&1").trim().take(200))
+    val parent = p.path.substringBeforeLast("/")
+    sb.append(shText("ls -ldn ${q(p.path)} ${q(parent)} 2>&1").trim()).append("\n")
+    val t = shText("touch ${q("$parent/.t")} 2>&1 && rm ${q("$parent/.t")} 2>&1").trim()
+    sb.append("запись в родителя: ").append(t.ifEmpty { "ОК" }).append("\n")
+    sb.append(shText("ls -ln ${q(p.path)} 2>&1 | head -6").trim())
     return sb.toString()
 }
 
@@ -276,6 +283,11 @@ class MainActivity : Activity() {
                         .setTitle("Не удалось удалить")
                         .setMessage(errors.toString())
                         .setPositiveButton("OK", null)
+                        .setNeutralButton("Копировать") { _, _ ->
+                            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("error", errors.toString()))
+                            Toast.makeText(this, "Скопировано", Toast.LENGTH_SHORT).show()
+                        }
                         .show()
                 }
                 refresh()
