@@ -111,6 +111,26 @@ private fun loadPacks(): LoadResult {
     return LoadResult(res, dbg.toString())
 }
 
+// Возвращает "" при успехе, иначе описание ошибки
+private fun deletePack(p: Pack): String {
+    if (p.folder.isBlank() || p.folder.contains("/") || p.folder.contains("..")) return "плохое имя папки"
+    if (!p.path.contains("com.mojang") || !p.path.contains("_packs/")) return "подозрительный путь: ${p.path}"
+    val variants = listOf(
+        p.path,
+        p.path.replaceFirst("/sdcard", "/mnt/pass_through/0/emulated/0"),
+        p.path.replaceFirst("/sdcard", "/mnt/androidwritable/0/emulated/0")
+    )
+    val sb = StringBuilder()
+    for (v in variants) {
+        val out = shText("rm -rf ${q(v)} 2>&1").trim().take(200)
+        val still = shText("ls -d ${q(p.path)} 2>&1").trim() == p.path
+        if (!still) return ""
+        sb.append(v.substringBefore("/Android")).append(": ").append(out.ifEmpty { "нет вывода, но папка осталась" }).append("\n")
+    }
+    sb.append("id: ").append(shText("id 2>&1").trim().take(200))
+    return sb.toString()
+}
+
 class MainActivity : Activity() {
     private val ex = Executors.newSingleThreadExecutor()
     private lateinit var status: TextView
@@ -243,12 +263,21 @@ class MainActivity : Activity() {
     private fun delete(sel: List<Pack>) {
         status.text = "Удаляю..."
         ex.execute {
+            val errors = StringBuilder()
             for (p in sel) {
-                if (p.folder.isBlank() || p.folder.contains("/") || p.folder.contains("..")) continue
-                shText("rm -rf ${q(p.path)} 2>&1")
+                val e = deletePack(p)
+                if (e.isNotEmpty()) errors.append(p.name).append(":\n").append(e).append("\n\n")
             }
             runOnUiThread {
-                Toast.makeText(this, "Готово", Toast.LENGTH_SHORT).show()
+                if (errors.isEmpty()) {
+                    Toast.makeText(this, "Удалено", Toast.LENGTH_SHORT).show()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Не удалось удалить")
+                        .setMessage(errors.toString())
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
                 refresh()
             }
         }
