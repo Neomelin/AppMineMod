@@ -19,7 +19,12 @@ import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.util.concurrent.Executors
 
-const val BASE = "/sdcard/Android/data/com.mojang.minecraftpe/files/games/com.mojang"
+val ROOTS = listOf(
+    "/sdcard/Android/data/com.mojang.minecraftpe",
+    "/sdcard/games/com.mojang",
+    "/data/media/0/Android/data/com.mojang.minecraftpe",
+    "/data/media/0/games/com.mojang"
+)
 val DIRS = linkedMapOf(
     "behavior_packs" to "Behavior",
     "resource_packs" to "Resource",
@@ -27,10 +32,11 @@ val DIRS = linkedMapOf(
     "development_resource_packs" to "Dev resource"
 )
 
-data class Pack(val dir: String, val folder: String, val name: String, val icon: Bitmap?) {
-    val path get() = "$BASE/$dir/$folder"
+data class Pack(val dir: String, val folder: String, val name: String, val icon: Bitmap?, val path: String) {
     val label get() = DIRS[dir] ?: dir
 }
+
+data class LoadResult(val packs: List<Pack>, val debug: String)
 
 private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 
@@ -49,18 +55,30 @@ private fun sh(cmd: String): ByteArray {
 
 private fun shText(cmd: String) = String(sh(cmd), Charsets.UTF_8)
 
-private fun loadPacks(): List<Pack> {
+private fun loadPacks(): LoadResult {
     val res = mutableListOf<Pack>()
-    for (d in DIRS.keys) {
-        val folders = shText("ls -1 ${q("$BASE/$d")} 2>/dev/null").lines().filter { it.isNotBlank() }
-        for (f in folders) {
-            val base = "$BASE/$d/$f"
+    val seen = HashSet<String>()
+    val dbg = StringBuilder()
+    for (root in ROOTS) {
+        val chk = shText("ls -d ${q(root)} 2>&1").trim().lines().firstOrNull() ?: ""
+        val exists = chk == root
+        val found = if (exists)
+            shText("find ${q(root)} -maxdepth 8 -name manifest.json 2>/dev/null").lines().filter { it.isNotBlank() }
+        else emptyList()
+        dbg.append("$root\n  ${if (exists) "папка есть, manifest.json: ${found.size}" else chk.take(70)}\n")
+        for (mf in found) {
+            if (mf.contains("/worlds/")) continue
+            val path = mf.substringBeforeLast("/")
+            val dir = path.substringBeforeLast("/").substringAfterLast("/")
+            if (dir !in DIRS.keys) continue
+            val f = path.substringAfterLast("/")
+            if (!seen.add("$dir/$f")) continue
             var name = f
             try {
-                val raw = shText("cat ${q("$base/manifest.json")} 2>/dev/null").trim().trimStart('\uFEFF')
+                val raw = shText("cat ${q("$path/manifest.json")} 2>/dev/null").trim().trimStart('\uFEFF')
                 name = JSONObject(raw).getJSONObject("header").optString("name", f)
                 if (name.startsWith("pack.")) {
-                    val lang = shText("cat ${q("$base/texts/en_US.lang")} 2>/dev/null")
+                    val lang = shText("cat ${q("$path/texts/en_US.lang")} 2>/dev/null")
                     val line = lang.lines().firstOrNull { it.startsWith("$name=") }
                     val v = line?.substringAfter("=")?.substringBefore("##")?.trim()
                     name = if (!v.isNullOrEmpty()) v else f
@@ -69,12 +87,12 @@ private fun loadPacks(): List<Pack> {
                 name = f
             }
             name = name.replace(Regex("§."), "").trim().ifEmpty { f }
-            val bytes = sh("cat ${q("$base/pack_icon.png")} 2>/dev/null")
+            val bytes = sh("cat ${q("$path/pack_icon.png")} 2>/dev/null")
             val icon = if (bytes.isNotEmpty()) BitmapFactory.decodeByteArray(bytes, 0, bytes.size) else null
-            res.add(Pack(d, f, name, icon))
+            res.add(Pack(dir, f, name, icon, path))
         }
     }
-    return res
+    return LoadResult(res, dbg.toString())
 }
 
 class MainActivity : Activity() {
@@ -149,17 +167,18 @@ class MainActivity : Activity() {
         status.text = "Загрузка..."
         ex.execute {
             try {
-                val packs = loadPacks()
-                runOnUiThread { show(packs) }
+                val r = loadPacks()
+                runOnUiThread { show(r) }
             } catch (e: Throwable) {
                 runOnUiThread { status.text = "Ошибка: ${e.message}" }
             }
         }
     }
 
-    private fun show(packs: List<Pack>) {
+    private fun show(r: LoadResult) {
+        val packs = r.packs
         list.removeAllViews(); rows.clear()
-        status.text = if (packs.isEmpty()) "Паков не найдено" else "Найдено паков: ${packs.size}"
+        status.text = if (packs.isEmpty()) "Паков не найдено\n\n${r.debug}" else "Найдено паков: ${packs.size}"
         for (p in packs) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
